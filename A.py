@@ -199,7 +199,16 @@ def get_monia_rate(date):
         date_str = date.strftime('%d/%m/%Y')  # Ensure date is in the correct format
         url_page = construire_url_monia(date)
 
-        response = requests.get(url_page)
+        # Adding custom headers to imitate a browser request
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Connection": "keep-alive",
+        }
+
+        # Making the request with the custom headers
+        response = requests.get(url_page, headers=headers)
         response.raise_for_status()  # Check for HTTP errors
 
         soup = BeautifulSoup(response.content, 'html.parser')
@@ -223,7 +232,6 @@ def get_monia_rate(date):
     except Exception as e:
         st.error(f"Error fetching MONIA rate: {str(e)}")
         return None
-
 
 
 
