@@ -195,26 +195,25 @@ def telecharger_csv_monia(date):
 
 import requests
 
+
 def get_monia_rate(date):
     """Fetch the MONIA rate for a given date."""
     try:
-        date_str = date.strftime('%d/%m/%Y')
+        date_str = date.strftime('%d/%m/%Y')  # Ensure date is in the correct format
         url_page = construire_url_monia(date)
 
-        # Using a session
-        session = requests.Session()
-
         # Adding custom headers to imitate a browser request
-        session.headers.update({
+        headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3",
             "Accept-Language": "en-US,en;q=0.9",
             "Accept-Encoding": "gzip, deflate, br",
             "Connection": "keep-alive",
-            "Referer": "https://www.bkam.ma",
-        })
+            "DNT": "1",  # Do Not Track
+            "Referer": "https://www.bkam.ma",  # Referrer for the request
+        }
 
-        # Making the request with the session
-        response = session.get(url_page)
+        # Making the request with the custom headers
+        response = requests.get(url_page, headers=headers)
         response.raise_for_status()  # Check for HTTP errors
 
         soup = BeautifulSoup(response.content, 'html.parser')
@@ -227,7 +226,7 @@ def get_monia_rate(date):
                 rows.append([value.text.strip() for value in row.find_all('td')])
 
             df = pd.DataFrame(rows, columns=headers)
-            df['Date'] = date.strftime('%Y-%m-%d')
+            df['Date'] = date.strftime('%Y-%m-%d')  # Add the current date as a column
             monia_rate_str = df.loc[df['Date de référence'] == date_str, 'Indice MONIA'].values[0]
             monia_rate_real = float(monia_rate_str.replace(',', '.').replace('%', '').strip()) / 100
             return monia_rate_real
@@ -236,7 +235,6 @@ def get_monia_rate(date):
 
     except Exception as e:
         return None
-
 
 
 
