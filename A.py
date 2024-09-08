@@ -204,13 +204,13 @@ def get_monia_rate(date):
 
         # Adding custom headers to imitate a browser request
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
             "Accept-Language": "en-US,en;q=0.9",
             "Accept-Encoding": "gzip, deflate, br",
             "Connection": "keep-alive",
-            "DNT": "1",  # Do Not Track
-            "Referer": "https://www.bkam.ma",  # Referrer for the request
+            "Referer": "https://www.bkam.ma",
         }
+
 
         # Making the request with the custom headers and timeout
         response = requests.get(url_page, headers=headers, timeout=10)
