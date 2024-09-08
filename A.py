@@ -199,16 +199,19 @@ def get_monia_rate(date):
         date_str = date.strftime('%d/%m/%Y')  # Ensure date is in the correct format
         url_page = construire_url_monia(date)
 
+        # Using session to maintain headers and cookies
+        session = requests.Session()
+
         # Adding custom headers to imitate a browser request
-        headers = {
+        session.headers.update({
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3",
             "Accept-Language": "en-US,en;q=0.9",
             "Accept-Encoding": "gzip, deflate, br",
             "Connection": "keep-alive",
-        }
+        })
 
-        # Making the request with the custom headers
-        response = requests.get(url_page, headers=headers)
+        # Making the request with the session
+        response = session.get(url_page)
         response.raise_for_status()  # Check for HTTP errors
 
         soup = BeautifulSoup(response.content, 'html.parser')
@@ -232,9 +235,6 @@ def get_monia_rate(date):
     except Exception as e:
         st.error(f"Error fetching MONIA rate: {str(e)}")
         return None
-
-
-
 
 
 
@@ -288,7 +288,7 @@ def floatleg(daily_forward_rates_with_monia_df, start, end, frequence=30, notion
     
     # Number of periods (based on frequence)
     num_periods = nombres_jour // frequence
-    print(num_periods)
+
     # Initialize the list for cash flows
     float_leg_values = []
     
@@ -310,7 +310,7 @@ def floatleg(daily_forward_rates_with_monia_df, start, end, frequence=30, notion
             forward_rate = daily_forward_rates_with_monia_df.loc[i, "Forward_Rate"]
             
             # Apply the discount factor for each day
-            p *= (1 / (1 + forward_rate * (1 / 365)))
+            p *= (1 / (1 + (forward_rate/100) * (1 / 365)))
         
         # Update the cumulative discount factor
         cumulative_discount_factor *= p
@@ -342,7 +342,7 @@ def fixedleg(daily_forward_rates_with_monia_df, start, end, frequence=30, fixed_
         
         for i in range(period_start_day, period_end_day):
             forward_rate = daily_forward_rates_with_monia_df.loc[i, "Forward_Rate"]
-            p *= (1 / (1 + forward_rate * (1 / 365)))
+            p *= (1 / (1 + (forward_rate/100) * (1 / 365)))
         
         cumulative_discount_factor *= p
         fixed_payment = notionnel * fixed_rate * (frequence / 365)
