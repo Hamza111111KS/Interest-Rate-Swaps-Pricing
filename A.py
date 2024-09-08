@@ -195,11 +195,11 @@ def telecharger_csv_monia(date):
 
 import requests
 import requests
-
 def get_monia_rate(date):
-    """Fetch the MONIA rate for a given date."""
+    """Fetch the MONIA rate for a given date with improved error handling and timeouts."""
     try:
-        date_str = date.strftime('%d/%m/%Y')  # Ensure date is in the correct format
+        # Format the date to the required string format
+        date_str = date.strftime('%d/%m/%Y')
         url_page = construire_url_monia(date)
 
         # Adding custom headers to imitate a browser request
@@ -212,32 +212,57 @@ def get_monia_rate(date):
             "Referer": "https://www.bkam.ma",  # Referrer for the request
         }
 
-        # Making the request with the custom headers
-        response = requests.get(url_page, headers=headers)
-        response.raise_for_status()  # Check for HTTP errors
+        # Making the request with the custom headers and timeout
+        response = requests.get(url_page, headers=headers, timeout=10)
         
+        # Check if the request was successful
+        if response.status_code != 200:
+            st.error(f"Failed to fetch data from the server. Status code: {response.status_code}")
+            return None
+
+        # Save the HTML response for debugging purposes
         with open('monia_raw_html.txt', 'w', encoding='utf-8') as file:
             file.write(response.text)
 
+        # Parse the response with BeautifulSoup
         soup = BeautifulSoup(response.content, 'html.parser')
         table = soup.find('table')
 
         if table is not None:
+            # Extract table headers and rows
             headers = [header.text.strip() for header in table.find_all('th')]
             rows = []
             for row in table.find_all('tr')[1:]:
                 rows.append([value.text.strip() for value in row.find_all('td')])
 
+            # Create a DataFrame from the rows
             df = pd.DataFrame(rows, columns=headers)
-            df['Date'] = date.strftime('%Y-%m-%d')  # Add the current date as a column
+
+            # Add the date to the DataFrame
+            df['Date'] = date.strftime('%Y-%m-%d')
+
+            # Find and extract the MONIA rate
             monia_rate_str = df.loc[df['Date de référence'] == date_str, 'Indice MONIA'].values[0]
             monia_rate_real = float(monia_rate_str.replace(',', '.').replace('%', '').strip()) / 100
+
             return monia_rate_real
         else:
+            st.error(f"No table found on the page for {date_str}.")
             return None
 
-    except Exception as e:
+    except requests.Timeout:
+        st.error("The request timed out. Please try again later.")
         return None
+    except requests.HTTPError as http_err:
+        st.error(f"HTTP error occurred: {http_err}")
+        return None
+    except requests.RequestException as req_err:
+        st.error(f"Request error occurred: {req_err}")
+        return None
+    except Exception as e:
+        st.error(f"An unexpected error occurred: {e}")
+        return None
+
 
 
 
