@@ -193,13 +193,15 @@ def telecharger_csv_monia(date):
     except Exception as e:
         return pd.DataFrame()
 
+import requests
+
 def get_monia_rate(date):
     """Fetch the MONIA rate for a given date."""
     try:
-        date_str = date.strftime('%d/%m/%Y')  # Ensure date is in the correct format
+        date_str = date.strftime('%d/%m/%Y')
         url_page = construire_url_monia(date)
 
-        # Using session to maintain headers and cookies
+        # Using a session
         session = requests.Session()
 
         # Adding custom headers to imitate a browser request
@@ -208,6 +210,7 @@ def get_monia_rate(date):
             "Accept-Language": "en-US,en;q=0.9",
             "Accept-Encoding": "gzip, deflate, br",
             "Connection": "keep-alive",
+            "Referer": "https://www.bkam.ma",
         })
 
         # Making the request with the session
@@ -224,16 +227,14 @@ def get_monia_rate(date):
                 rows.append([value.text.strip() for value in row.find_all('td')])
 
             df = pd.DataFrame(rows, columns=headers)
-            df['Date'] = date.strftime('%Y-%m-%d')  # Add the current date as a column
+            df['Date'] = date.strftime('%Y-%m-%d')
             monia_rate_str = df.loc[df['Date de référence'] == date_str, 'Indice MONIA'].values[0]
             monia_rate_real = float(monia_rate_str.replace(',', '.').replace('%', '').strip()) / 100
             return monia_rate_real
         else:
-            st.error(f"No MONIA data found for {date_str}")
             return None
 
     except Exception as e:
-        st.error(f"Error fetching MONIA rate: {str(e)}")
         return None
 
 
@@ -476,3 +477,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
