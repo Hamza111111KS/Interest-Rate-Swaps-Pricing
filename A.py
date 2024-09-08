@@ -194,7 +194,7 @@ def telecharger_csv_monia(date):
         return pd.DataFrame()
 
 import requests
-
+import requests
 
 def get_monia_rate(date):
     """Fetch the MONIA rate for a given date."""
@@ -215,6 +215,9 @@ def get_monia_rate(date):
         # Making the request with the custom headers
         response = requests.get(url_page, headers=headers)
         response.raise_for_status()  # Check for HTTP errors
+        
+        with open('monia_raw_html.txt', 'w', encoding='utf-8') as file:
+            file.write(response.text)
 
         soup = BeautifulSoup(response.content, 'html.parser')
         table = soup.find('table')
@@ -235,6 +238,7 @@ def get_monia_rate(date):
 
     except Exception as e:
         return None
+
 
 
 
@@ -473,6 +477,14 @@ def main():
         st.dataframe(filtered_forward_rates_df)
 
 
-if __name__ == "__main__":
-    main()
 
+if __name__ == "__main__":
+    # Check if the script has already been run
+    if "STREAMLIT_RUN" not in os.environ:
+        # Set an environment variable to ensure it only runs once
+        os.environ["STREAMLIT_RUN"] = "true"
+        # Run the Streamlit app
+        os.system('streamlit run A.py')
+    else:
+        # This block runs when Streamlit is executing the script
+        main()
