@@ -193,39 +193,33 @@ def telecharger_csv_monia(date):
     except Exception as e:
         return pd.DataFrame()
 
-import requests
-import requests
+
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from webdriver_manager.chrome import ChromeDriverManager
+from selenium.webdriver.chrome.options import Options
+
 def get_monia_rate(date):
-    """Fetch the MONIA rate for a given date with improved error handling and timeouts."""
+    """Fetch MONIA rate using Selenium (headless browser)."""
     try:
-        # Format the date to the required string format
+        # Configure headless Chrome
+        options = Options()
+        options.headless = True  # Run in headless mode (no UI)
+        options.add_argument("--no-sandbox")
+        options.add_argument("--disable-dev-shm-usage")
+        driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+
         date_str = date.strftime('%d/%m/%Y')
         url_page = construire_url_monia(date)
 
-        # Adding custom headers to imitate a browser request
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-            "Accept-Language": "en-US,en;q=0.9",
-            "Accept-Encoding": "gzip, deflate, br",
-            "Connection": "keep-alive",
-            "Referer": "https://www.bkam.ma",
-        }
+        # Open the URL with Selenium
+        driver.get(url_page)
 
+        # You can now scrape the page with Selenium
+        page_source = driver.page_source
 
-        # Making the request with the custom headers and timeout
-        response = requests.get(url_page, headers=headers, timeout=10)
-        
-        # Check if the request was successful
-        if response.status_code != 200:
-            st.error(f"Failed to fetch data from the server. Status code: {response.status_code}")
-            return None
-
-        # Save the HTML response for debugging purposes
-        with open('monia_raw_html.txt', 'w', encoding='utf-8') as file:
-            file.write(response.text)
-
-        # Parse the response with BeautifulSoup
-        soup = BeautifulSoup(response.content, 'html.parser')
+        # Use BeautifulSoup to parse the page source
+        soup = BeautifulSoup(page_source, 'html.parser')
         table = soup.find('table')
 
         if table is not None:
@@ -249,19 +243,13 @@ def get_monia_rate(date):
         else:
             st.error(f"No table found on the page for {date_str}.")
             return None
-
-    except requests.Timeout:
-        st.error("The request timed out. Please try again later.")
-        return None
-    except requests.HTTPError as http_err:
-        st.error(f"HTTP error occurred: {http_err}")
-        return None
-    except requests.RequestException as req_err:
-        st.error(f"Request error occurred: {req_err}")
-        return None
     except Exception as e:
-        st.error(f"An unexpected error occurred: {e}")
-        return None
+        return None  # Handle exceptions
+        
+
+
+
+
 
 
 
