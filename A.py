@@ -1,5 +1,5 @@
 import requests
-from bs4 import BeautifulSoup
+import base64
 import pandas as pd
 import numpy as np
 from scipy.interpolate import interp1d
@@ -7,9 +7,16 @@ import matplotlib.pyplot as plt
 import streamlit as st
 from datetime import datetime
 import os
+
+# Set Streamlit to wide layout
+st.set_page_config(layout="wide")
 # Helper function to convert Streamlit date to the required format
 def convert_streamlit_date_to_str(date_obj):
     return date_obj.strftime('%d/%m/%Y')
+import pandas as pd
+from datetime import datetime
+
+
 
 
 def construire_url_tmp(date):
@@ -18,59 +25,82 @@ def construire_url_tmp(date):
         date = pd.to_datetime(date, format='%d/%m/%Y')
     
     date_formatee = date.strftime('%d/%m/%Y').replace('/', '%2F')
-    base_url = 'https://www.bkam.ma/Marches/Principaux-indicateurs/Marche-obligataire/Marche-des-bons-de-tresor/Marche-secondaire/Taux-de-reference-des-bons-du-tresor'
-    params = f'?date={date_formatee}&block=e1d6b9bbf87f86f8ba53e8518e882982#address-c3367fcefc5f524397748201aee5dab8-e1d6b9bbf87f86f8ba53e8518e882982'
+    base_url = 'https://www.bkam.ma/fr/export/blockcsv/2340/c3367fcefc5f524397748201aee5dab8/e1d6b9bbf87f86f8ba53e8518e882982'
+    params = f'?date={date_formatee}&block=e1d6b9bbf87f86f8ba53e8518e882982?t=1726615279'
     
     return f'{base_url}{params}'
 
 
+
+
+# Function to download, process, and save the CSV file
 def telecharger_csv_tmp(date, save_directory="downloads"):
-    """Download the CSV data for the specified date and save it locally."""
+    """Download, clean, and save the CSV data for the specified date."""
     try:
-        if isinstance(date, str):
-            date = pd.to_datetime(date, format='%d/%m/%Y')
+        url = construire_url_tmp(date)
+        response = requests.get(url)
+        response.raise_for_status()
+
+        if not os.path.exists(save_directory):
+            os.makedirs(save_directory)
         
-        url_page = construire_url_tmp(date)
-        response = requests.get(url_page)
-        response.raise_for_status()  # Check for HTTP errors
-
-        soup = BeautifulSoup(response.content, 'html.parser')
-        table = soup.find('table')
+        # Set the paths for raw and processed files
+        raw_filename = f"New_BKAM_Data_{date.strftime('%Y-%m-%d')}.csv"
+        processed_filename = f"BKAM_Data_{date.strftime('%Y-%m-%d')}.csv"
         
-        if table is not None:
-            headers = [header.text.strip() for header in table.find_all('th')]
-            rows = []
-            for row in table.find_all('tr')[1:]:
-                row_data = [value.text.strip() for value in row.find_all('td')]
-                if "Total" not in row_data:
-                    rows.append(row_data)
-            
-            df = pd.DataFrame(rows, columns=headers)
-            
-            # Rename and clean columns
-            df['Date déchéance'] = df['Date d\'échéance']
-            df = df.drop(['Transaction', 'Date d\'échéance'], axis=1)
-            
-            # Create the directory if it does not exist
-            if not os.path.exists(save_directory):
-                os.makedirs(save_directory)
+        raw_save_path = os.path.join(save_directory, raw_filename)
+        processed_save_path = os.path.join(save_directory, processed_filename)
 
-            # Define file name and save path
-            filename = f"BKAM_Data_{date.strftime('%Y-%m-%d')}.csv"
-            save_path = os.path.join(save_directory, filename)
-            
-            # Save the DataFrame to a CSV file
-            df.to_csv(save_path, index=False, encoding='utf-8-sig')
-            return df  # Return the DataFrame
+        # Save the raw CSV file
+        with open(raw_save_path, 'wb') as file:
+            file.write(response.content)
 
+        # Read the CSV file with the correct delimiter (semicolon) and skip the first 3 lines
+        df = pd.read_csv(raw_save_path, skiprows=3, delimiter=';')
+
+        # Check the columns after reading the file
+        if len(df.columns) == 4:
+            df.columns = ['Date déchéance', 'Transaction', 'Taux moyen pondéré', 'Date de la valeur']
         else:
+            print(f"Unexpected number of columns: {len(df.columns)}")
             return pd.DataFrame()
 
+        # Remove rows with 'Total' and null values
+        df = df[~df['Date déchéance'].str.contains("Total", na=False)]
+        df = df.dropna()
+
+        # Convert the date columns to datetime
+        df['Date déchéance'] = pd.to_datetime(df['Date déchéance'], format='%d/%m/%Y')
+        df['Date de la valeur'] = pd.to_datetime(df['Date de la valeur'], format='%d/%m/%Y')
+
+        # Clean the interest rate column and convert it to numeric, then format it with French notation
+        df['Taux moyen pondéré'] = df['Taux moyen pondéré'].str.replace('%', '').replace(',', '.', regex=True).astype(float)
+
+        # Format the 'Taux moyen pondéré' back to a string with the required French formatting
+        df['Taux moyen pondéré'] = df['Taux moyen pondéré'].apply(lambda x: f"{x:,.2f}".replace(",", " ").replace(".", ",") + " %")
+
+        # Drop the 'Transaction' column if it's not needed
+        df = df.drop(columns=['Transaction'])
+
+        # Convert the 'Date d\'échéance' and 'Date de la valeur' back to the required date format
+        df['Date déchéance'] = df['Date déchéance'].dt.strftime('%d/%m/%Y')
+        df['Date de la valeur'] = df['Date de la valeur'].dt.strftime('%d/%m/%Y')
+
+        # Select relevant columns and save the cleaned data to a new CSV file
+        df[['Taux moyen pondéré', 'Date de la valeur', 'Date déchéance']].to_csv(processed_save_path, index=False, sep=';')
+
+        print(f"Processed data saved to {processed_save_path}")
+
+        return df[['Taux moyen pondéré', 'Date de la valeur', 'Date déchéance']]
+
     except requests.HTTPError as e:
+        print(f"HTTP Error: {e}")
         return pd.DataFrame()
     except requests.RequestException as e:
+        print(f"Request Exception: {e}")
         return pd.DataFrame()
     except Exception as e:
+        print(f"Error: {e}")
         return pd.DataFrame()
 
 
@@ -84,7 +114,7 @@ def process_bkam_data(df):
     df["Date déchéance"] = pd.to_datetime(df["Date déchéance"], format="%d/%m/%Y")
 
     # Calculate the maturity in days
-    df["Maturite jour"] = (df['Date déchéance'] - pd.Timestamp('today')).dt.days
+    df["Maturite jour"] = (df['Date déchéance'] - df["Date de la valeur"]).dt.days
     
     # Return only relevant columns for interpolation
     bond_data = df[['Maturite jour', 'TMP']].dropna()
@@ -104,7 +134,7 @@ def get_zero_coupon_rates(date):
 
 def interpolate_rates(bond_data, zero):
     """Interpolate rates using bond data and fill the zero dataframe."""
-    interp_func = interp1d(bond_data['Maturite jour'], bond_data['TMP'], kind='cubic', fill_value="extrapolate")
+    interp_func = interp1d(bond_data['Maturite jour'], bond_data['TMP'], kind='linear', fill_value="extrapolate")
 
     zero['Taux'] = interp_func(zero['Maturite jour'])
     return zero
@@ -131,22 +161,23 @@ def setup(date):
 def bootstrap(zero_coupon):
     zero_coupon['Taux'] = zero_coupon['Taux'] / 100
 
-    for i in range(3):
-        zero_coupon.loc[i, 'Taux ZC'] = zero_coupon.loc[i, 'Taux']
-
-    for n in range(3, len(zero_coupon)):
+    for j in range(len(zero_coupon)):
+        if zero_coupon.loc[j, 'Maturite jour']<366:
+            zero_coupon.loc[j, 'Taux ZC'] = zero_coupon.loc[j, 'Taux']
+            
+    for n in range(j, len(zero_coupon)):
         tN = zero_coupon.loc[n, 'Taux']
         summation = 0
         
         for i in range(1, n):
             tN_i = zero_coupon.loc[n, 'Taux']
             ZC_i = zero_coupon.loc[i, 'Taux ZC']
-            discounted_taux = (1 / (1 + tN_i) ** (i + 1))
-            discounted_zc = (1 / (1 + ZC_i) ** (i + 1))
+            discounted_taux = (1 / (1 + tN_i) ** (i ))
+            discounted_zc = (1 / (1 + ZC_i) ** (i))
             summation += discounted_taux - discounted_zc
         
-        final_term = 1 / (1 + tN) ** (n + 1)
-        ZC_N = (1 / (summation + final_term)) ** (1 / (n + 1)) - 1
+        final_term = 1 / (1 + tN) ** (n)
+        ZC_N = (1 / (summation + final_term)) ** (1 / (n)) - 1
         zero_coupon.loc[n, 'Taux ZC'] = ZC_N
 
     return zero_coupon
@@ -156,105 +187,64 @@ def construire_url_monia(date):
     if isinstance(date, str):
         date = pd.to_datetime(date, format='%d/%m/%Y')
     date_formatee = date.strftime('%d/%m/%Y').replace('/', '%2F')
-    base_url = 'https://www.bkam.ma/Marches/Principaux-indicateurs/Marche-monetaire/Indice-monia-moroccan-overnight-index-average'
-    params = f'?date={date_formatee}&block=4734c7b73113d8d72895a19090974066#address-30551c1667f5f2004fb0019220d41795-4734c7b73113d8d72895a19090974066'
+    base_url = 'https://www.bkam.ma/fr/export/blockcsv/566622/30551c1667f5f2004fb0019220d41795/4734c7b73113d8d72895a19090974066'
+    params = f'?date={date_formatee}&block=4734c7b73113d8d72895a19090974066'
     return f'{base_url}{params}'
 
 
-def telecharger_csv_monia(date):
+# Function to download and clean the MONIA CSV file
+def get_monia_rate(date, save_directory="downloads"):
+    """Fetch the MONIA rate for a given date by downloading and cleaning a CSV file."""
     try:
-        if isinstance(date, str):
-            date = pd.to_datetime(date, format='%d/%m/%Y')
-        
-        url_page = construire_url_monia(date)
+        # Construct the MONIA CSV download URL
+        url = construire_url_monia(date)
 
-        response = requests.get(url_page)
-        response.raise_for_status()
+        # Send request to download the CSV
+        response = requests.get(url)
+        response.raise_for_status()  # Check for HTTP errors
 
-        soup = BeautifulSoup(response.content, 'html.parser')
+        # Create the save directory if it doesn't exist
+        if not os.path.exists(save_directory):
+            os.makedirs(save_directory)
 
-        table = soup.find('table')
-        if table is not None:
-            headers = [header.text.strip() for header in table.find_all('th')]
-            rows = []
-            for row in table.find_all('tr')[1:]:
-                rows.append([value.text.strip() for value in row.find_all('td')])
+        # Save the raw CSV file for debugging or future reference
+        raw_filename = f"MONIA_Raw_Data_{date.strftime('%Y-%m-%d')}.csv"
+        raw_save_path = os.path.join(save_directory, raw_filename)
+        with open(raw_save_path, 'wb') as file:
+            file.write(response.content)
 
-            df = pd.DataFrame(rows, columns=headers)
-            df['Date'] = date.strftime('%Y-%m-%d')
-            return df
+        # Read the CSV file (assuming it's semicolon-separated with headers starting at row 2)
+        df = pd.read_csv(raw_save_path, sep=';', skiprows=2)
+
+        # Check if the necessary columns are available
+        if 'Indice MONIA' in df.columns and 'Date de référence' in df.columns:
+            # Clean 'Indice MONIA' by replacing commas with dots and removing percentage signs
+            df['Indice MONIA'] = df['Indice MONIA'].str.replace('%', '').str.replace(',', '.').astype(float)
+
+            # Filter by the exact date provided
+            date_str = date.strftime('%d/%m/%Y')
+            df_filtered = df[df['Date de référence'] == date_str]
+
+            # If we find MONIA for the date, return it
+            if not df_filtered.empty:
+                monia_rate = df_filtered['Indice MONIA'].values[0] / 100  # Convert to decimal
+                return monia_rate
+            else:
+                print(f"No MONIA data available for {date_str}.")
+                return None
         else:
-            return pd.DataFrame()
+            print("Required columns ('Indice MONIA', 'Date de référence') not found in the CSV file.")
+            return None
 
     except requests.HTTPError as e:
-        return pd.DataFrame()
+        print(f"HTTP Error: {e}")
+        return None
     except requests.RequestException as e:
-        return pd.DataFrame()
+        print(f"Request Exception: {e}")
+        return None
     except Exception as e:
-        return pd.DataFrame()
-
-
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
-from selenium.webdriver.chrome.options import Options
-
-def get_monia_rate(date):
-    """Fetch MONIA rate using Selenium (headless browser)."""
-    try:
-        # Configure headless Chrome
-        options = Options()
-        options.headless = True  # Run in headless mode (no UI)
-        options.add_argument("--no-sandbox")
-        options.add_argument("--disable-dev-shm-usage")
-        driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
-
-        date_str = date.strftime('%d/%m/%Y')
-        url_page = construire_url_monia(date)
-
-        # Open the URL with Selenium
-        driver.get(url_page)
-
-        # You can now scrape the page with Selenium
-        page_source = driver.page_source
-
-        # Use BeautifulSoup to parse the page source
-        soup = BeautifulSoup(page_source, 'html.parser')
-        table = soup.find('table')
-
-        if table is not None:
-            # Extract table headers and rows
-            headers = [header.text.strip() for header in table.find_all('th')]
-            rows = []
-            for row in table.find_all('tr')[1:]:
-                rows.append([value.text.strip() for value in row.find_all('td')])
-
-            # Create a DataFrame from the rows
-            df = pd.DataFrame(rows, columns=headers)
-
-            # Add the date to the DataFrame
-            df['Date'] = date.strftime('%Y-%m-%d')
-
-            # Find and extract the MONIA rate
-            monia_rate_str = df.loc[df['Date de référence'] == date_str, 'Indice MONIA'].values[0]
-            monia_rate_real = float(monia_rate_str.replace(',', '.').replace('%', '').strip()) / 100
-
-            return monia_rate_real
-        else:
-            st.error(f"No table found on the page for {date_str}.")
-            return None
-    except Exception as e:
-        return None  # Handle exceptions
-        
-
-
-
-
-
-
-
-
-
+        print(f"An unexpected error occurred: {e}")
+        return None
 
 def interpolate_zero_coupon_rates(maturities, rates, new_maturities):
     interpolation_func = interp1d(maturities, rates, kind='linear', fill_value="extrapolate")
@@ -271,9 +261,11 @@ def calculate_daily_forward_rates_with_monia(maturities, spot_rates, monia_rate)
     forward_rates = []
     
     forward_rates.append({
-        'Maturity_1': 0,
-        'Maturity_2': maturities[0],
-        'Forward_Rate': monia_rate
+        'Maturity_1': maturities[0],
+        'Maturity_2': maturities[1],
+        'Spot_Rate_1': spot_rates[0],
+        'Spot_Rate_2': spot_rates[1],
+        'Forward_Rate': monia_rate*100
     })
     
     for i in range(1, len(maturities)):
@@ -368,7 +360,9 @@ def fixedleg(daily_forward_rates_with_monia_df, start, end, frequence=30, fixed_
     return sum(fixed_leg_values)
 
 
-def calculate_fixed_rate(daily_forward_rates_with_monia_df, start, end, frequence=30, notionnel=10000, tolerance=1e-4, max_iterations=1000):
+
+# Adjusted calculate_fixed_rate function to target specific NPV
+def calculate_fixed_rate(daily_forward_rates_with_monia_df, start, end, frequence=30, notionnel=10000, target_npv=0, tolerance=1e-4, max_iterations=1000):
     lower_bound = 0.00
     upper_bound = 0.4
     
@@ -377,7 +371,7 @@ def calculate_fixed_rate(daily_forward_rates_with_monia_df, start, end, frequenc
         fixed_leg_value = fixedleg(daily_forward_rates_with_monia_df, start, end, frequence, fixed_rate=fixed_rate_guess, notionnel=notionnel)
         floating_leg_value = floatleg(daily_forward_rates_with_monia_df, start, end, frequence, notionnel)
 
-        difference = fixed_leg_value - floating_leg_value
+        difference = fixed_leg_value - floating_leg_value - target_npv
         if abs(difference) < tolerance:
             return fixed_rate_guess
         
@@ -388,116 +382,308 @@ def calculate_fixed_rate(daily_forward_rates_with_monia_df, start, end, frequenc
     
     return None
 
-
 def calculate_npv(fixed_leg_value, float_leg_value, is_fixed_payer):
     if is_fixed_payer:
         return float_leg_value - fixed_leg_value
     else:
         return fixed_leg_value - float_leg_value
 
+
+# Function to encode image to base64
+def get_base64_image(image_path):
+    with open(image_path, "rb") as img_file:
+        return base64.b64encode(img_file.read()).decode()
+
+# CSS for positioning the logo and the title
+st.markdown(
+    """
+    <style>
+    .header {
+        display: flex;
+        justify-content: flex-start;
+        align-items: center;
+    }
+    .header img {
+        width: 150px;  /* Adjusted width to enlarge the logo */
+        margin-right: 20px;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+# Get the base64 encoded version of the logo
+# Correct path to your logo image (without duplication)
+logo_base64 = get_base64_image("E:/AF/Internships/Application/Crédit du Maroc/Pricer Application/logo.png")  # Use single correct path
+
+# Embed the logo and the title together in the header
+st.markdown(
+    f"""
+    <div class="header">
+        <img src="data:image/png;base64,{logo_base64}" alt="Logo">
+        <h1>IRS Swap Pricer with Dynamic MONIA and Zero-Coupon Rates</h1>
+    </div>
+    """,
+    unsafe_allow_html=True
+)
+import streamlit as st
+from datetime import datetime
+import numpy as np
+import os
+import streamlit as st
+from datetime import datetime
+import numpy as np
+import os
+
+import streamlit as st
+from datetime import datetime
+import pandas as pd
+import numpy as np
+import os
+import streamlit as st
+from datetime import datetime
+import pandas as pd
+import numpy as np
+import os
+
+
+
+
+
+
+# Get the base64 encoded version of the logo (ensure path is correct)
+logo_base64 = get_base64_image("E:\AF\Internships\Application\Crédit du Maroc\Pricer Application\logo.png")  # Adjust path as needed
+
+
+
+# Dropdown options for frequency
+frequency_options = {
+    "1 semaine": 7,
+    "2 semaines": 14,
+    "1 mois": 30,
+    "3 mois": 90,
+    "6 mois": 180,
+    "1 an": 365,
+    "5 ans": 1825
+}
+
+
+# Function to read the bond data from Excel
+def read_bond_data(file_path):
+    df = pd.read_excel(file_path)
+    return df
+# Function to clean and prepare the bond data
+def prepare_bond_data(df):
+    """
+    Clean and prepare the bond data for further calculations.
+    This includes removing commas, converting percentages, and parsing dates.
+
+    Parameters:
+    df: DataFrame containing the bond data
+    
+    Returns:
+    Cleaned DataFrame ready for processing
+    """
+    # Remove commas from number columns (e.g., prices and nominal values)
+
+    # Ensure that the column 'Valeur Nominale' exists or find the correct name
+    if 'Valeur Nominale ' in df.columns:
+        df['Valeur Nominale'] = df['Valeur Nominale '].replace({',': ''}, regex=True).astype(float)
+    else:
+        st.error("'Valeur Nominale' column not found!")
+
+    df['Prix'] = df['Prix'].replace({',': ''}, regex=True).astype(float)
+    df['Taux Nominal %'] = df['Taux Nominal %'].replace({',': ''}, regex=True).astype(float)
+
+    # Convert percentage columns to decimals
+    df['Taux Nominal %'] = df['Taux Nominal %'] / 100
+
+    # Parse date columns
+    df['Date Courbe'] = pd.to_datetime(df['Date Courbe'], format='%d/%m/%Y', dayfirst=True)
+    df['Date d\'échéance'] = pd.to_datetime(df["Date d'&eacute;ch&eacute;ance"], format='%d/%m/%Y', dayfirst=True)
+
+    # Return the cleaned DataFrame
+    return df
+
+# Function to calculate the bond durations
+def calculate_bond_duration(df,start_date):
+    df['Coupon Rate'] = df['Taux Nominal %'] / 100
+    # Correct the date parsing with dayfirst=True
+    df['Maturity in Years'] = (pd.to_datetime(df["Date d'&eacute;ch&eacute;ance"], dayfirst=True) - start_date).dt.days / 365
+    durations = []
+    for _, row in df.iterrows():
+        coupon_rate = row['Coupon Rate']
+        maturity_years = row['Maturity in Years']
+        price = row['Prix']
+        nominal_value = row['Valeur Nominale']
+        coupon_payments = coupon_rate * nominal_value
+        macaulay_duration = sum([(t * coupon_payments / (1 + coupon_rate)**t) for t in range(1, int(maturity_years) + 1)]) + \
+                            (maturity_years * nominal_value / (1 + coupon_rate)**maturity_years)
+        macaulay_duration /= price
+        durations.append(macaulay_duration)
+    df['Bond Duration'] = durations
+    return df
+
+# Function to match bond duration with swap duration
+def match_bond_duration_with_swap(df, swap_duration):
+    df['Duration Difference'] = abs(df['Bond Duration'] - swap_duration)
+    closest_bond = df.loc[df['Duration Difference'].idxmin()]
+    return closest_bond['Code ISIN']
+
+# Function to calculate Modified Duration and DV01 of IRS
+def calculate_modified_duration_and_dv01(daily_forward_rates_with_monia_df, start, end, frequence=30, fixed_rate=0.03, notionnel=10000, is_fixed_payer=True, rate_shift=1e-4):
+    # Step 1: Calculate the original NPV at the current fixed rate
+    fixed_leg_value = fixedleg(daily_forward_rates_with_monia_df, start, end, frequence, fixed_rate, notionnel)
+    float_leg_value = floatleg(daily_forward_rates_with_monia_df, start, end, frequence, notionnel=notionnel)
+    npv_original = calculate_npv(fixed_leg_value, float_leg_value, is_fixed_payer)
+
+    # Step 2: Perturb the fixed rate by a small amount (rate_shift) and recalculate NPV
+    perturbed_fixed_rate = fixed_rate + rate_shift
+    fixed_leg_value_perturbed = fixedleg(daily_forward_rates_with_monia_df, start, end, frequence, perturbed_fixed_rate, notionnel)
+    npv_perturbed = calculate_npv(fixed_leg_value_perturbed, float_leg_value, is_fixed_payer)
+
+    # Step 3: Calculate Modified Duration
+    modified_duration = (npv_perturbed - npv_original) / (rate_shift * npv_original)
+
+    # Step 4: Calculate DV01
+    dv01 = -modified_duration * npv_original / 10000  # 1 basis point = 1/10000 of 1%
+
+    return modified_duration, dv01
+# Main function for the pricer
 def main():
-    st.title("IRS Swap Pricer with Dynamic MONIA and Zero-Coupon Rates")
-    
-    st.sidebar.header("Input Parameters")
-    
-    # Streamlit date picker returns a datetime.date object, convert to datetime format
-    valuation_date = st.sidebar.date_input("Valuation Date", datetime.today())
-    start_date = pd.to_datetime(valuation_date)
-    end_date = st.sidebar.date_input("End Date", datetime.today())
-    end_date = pd.to_datetime(end_date)
-    
-    notional = st.sidebar.number_input("Notional", value=10000, min_value=0)
-    frequency = st.sidebar.number_input("Frequency (days)", value=30, min_value=1)
-    fixed_rate_input = st.sidebar.number_input("Fixed Rate (%)", value=3.0, format="%.4f") / 100
-    is_fixed_payer = st.sidebar.radio("Are you the Fixed Payer?", ["Yes", "No"]) == "Yes"
-    
-    # Fetch MONIA rate based on valuation date
-    monia_rate = get_monia_rate(start_date)
-    if monia_rate is None:
-        st.error("Failed to retrieve MONIA rate for the selected date.")
-        return
-    
-    st.sidebar.write(f"MONIA Rate on {start_date.strftime('%Y-%m-%d')}: {monia_rate * 100:.4f}%")
-    
-    # Fetch zero-coupon rates based on valuation date
-    bond_data = get_zero_coupon_rates(start_date)
-    if bond_data.empty:
-        st.error("Failed to retrieve zero-coupon rates for the selected date.")
-        return
-    
-    st.sidebar.write("Zero-Coupon Rates Retrieved:")
-    st.sidebar.dataframe(bond_data)
-    
-    # Prepare zero-coupon rates and maturities for interpolation
-    maturities = bond_data['Maturite jour'].values / 365  # Convert days to years
-    spot_rates = bond_data['TMP'].values
-    
-    # Interpolate zero-coupon rates for daily maturities
-    new_maturities = np.linspace(1 / 365, maturities[-1], int(maturities[-1] * 365))
-    interpolated_spot_rates = interpolate_zero_coupon_rates(maturities, spot_rates, new_maturities)
-    
-    # Calculate daily forward rates with MONIA
-    daily_forward_rates_with_monia_df = calculate_daily_forward_rates_with_monia(new_maturities, interpolated_spot_rates, monia_rate)
-    
-    # Calculate floating and fixed legs with the inputted fixed rate
-    fixed_leg_value = fixedleg(daily_forward_rates_with_monia_df, start_date, end_date, frequency, fixed_rate_input, notional)
-    float_leg_value = floatleg(daily_forward_rates_with_monia_df, start_date, end_date, frequency, notionnel=notional)
-    
-    # Calculate NPV with the current fixed rate
-    npv_current = calculate_npv(fixed_leg_value, float_leg_value, is_fixed_payer)
-    
-    # Display the NPV calculated from the fixed rate
-    st.header("Pricing Results")
-    st.write(f"**Current Fixed Rate:** {fixed_rate_input * 100:.4f}%")
-    st.write(f"**Fixed Leg Value:** {fixed_leg_value:.2f}")
-    st.write(f"**Floating Leg Value:** {float_leg_value:.2f}")
-    st.write(f"**Net Present Value (NPV):** {npv_current:.2f}")
-    
-    # Allow the user to input a new fixed rate and recalculate the NPV
-    st.sidebar.subheader("Modify Fixed Rate to Recalculate NPV")
-    user_fixed_rate = st.sidebar.slider("Fixed Rate (%)", min_value=0.0, max_value=10.0, value=fixed_rate_input * 100, step=0.01) / 100
-    
-    # Recalculate NPV with the user-specified fixed rate
-    fixed_leg_value_user_rate = fixedleg(daily_forward_rates_with_monia_df, start_date, end_date, frequency, user_fixed_rate, notional)
-    npv_user_fixed_rate = calculate_npv(fixed_leg_value_user_rate, float_leg_value, is_fixed_payer)
-    
-    # Display the recalculated NPV
-    st.write(f"**NPV with {user_fixed_rate * 100:.4f}% Fixed Rate:** {npv_user_fixed_rate:.2f}")
-    
-    # Allow the user to input a target NPV and calculate the required fixed rate
-    st.sidebar.subheader("Target NPV to Calculate Fair Rate")
-    target_npv = st.sidebar.number_input("Target NPV", value=0.0)
-    
-    # Calculate the fair fixed rate required to achieve the target NPV
-    fair_fixed_rate = calculate_fixed_rate(daily_forward_rates_with_monia_df, start_date, end_date, frequency, notionnel=notional, tolerance=1e-4, max_iterations=1000)
-    
-    # Display the calculated fair fixed rate
-    st.write(f"**Fair Fixed Rate for NPV of {target_npv:.2f}:** {fair_fixed_rate * 100:.4f}%")
-    
-    # Visualize the forward rates for the selected period
-    st.subheader("Forward Rates Visualization")
-    
-    # Filter the forward rates to only show data for the period between start_date and end_date
-    filtered_forward_rates_df = daily_forward_rates_with_monia_df[
-        (daily_forward_rates_with_monia_df['Maturity_2'] >= (start_date - pd.Timestamp('today')).days) &
-        (daily_forward_rates_with_monia_df['Maturity_2'] <= (end_date - pd.Timestamp('today')).days)
-    ]
-    
-    st.line_chart(filtered_forward_rates_df["Forward_Rate"])
-    
-    # Optional: Display detailed forward rates
-    with st.expander("Show Forward Rates Data"):
-        st.dataframe(filtered_forward_rates_df)
+    # Split the page into 3 vertical columns
+    col1, col2, col3 = st.columns(3)
+
+    # Column 1: Input Section
+    with col1:
+        st.header("Inputs")
+        valuation_date = st.date_input("Valuation Date", datetime.today())
+        start_date = pd.to_datetime(valuation_date)
+
+        end_date = st.date_input("End Date", datetime.today())
+        end_date = pd.to_datetime(end_date)
+
+        notional = st.number_input("Notional", value=1000000, min_value=0)
+        # Format the notional with spaces for thousands
+        formatted_notional = f"{int(notional):,}".replace(",", " ")
+
+        # Display the formatted notional
+        st.write(f"Notional : {formatted_notional} MAD")
+        # Frequency dropdown
+        frequency_selection = st.selectbox("Frequency", list(frequency_options.keys()))
+        frequency = frequency_options[frequency_selection]  # Convert to days based on the selection
+
+        fixed_rate_input = 3.0000/100
+        is_fixed_payer = st.radio("Are you the Fixed Payer?", ["Yes", "No"]) == "Yes"
+
+        # Fetch MONIA rate based on valuation date
+        monia_rate = get_monia_rate(start_date)
+        if monia_rate is None:
+            st.error("Failed to retrieve MONIA rate for the selected date.")
+            return
+
+        st.write(f"MONIA Rate on {start_date.strftime('%Y-%m-%d')}: {monia_rate * 100:.4f}%")
+
+    # Column 2: Pricing Results
+    with col2:
+        st.header("Pricing Results")
+        # Fetch zero-coupon rates based on valuation date
+        bond_data = get_zero_coupon_rates(start_date)
+        if bond_data.empty:
+            st.error("Failed to retrieve zero-coupon rates for the selected date.")
+            return
+
+        # Prepare zero-coupon rates and maturities for interpolation
+        maturities = bond_data['Maturite jour'].values / 365  # Convert days to years
+        spot_rates = bond_data['TMP'].values
+
+        # Interpolate zero-coupon rates for daily maturities
+        new_maturities = np.linspace(1 / 365, maturities[-1], int(maturities[-1] * 365))
+        interpolated_spot_rates = interpolate_zero_coupon_rates(maturities, spot_rates, new_maturities)
+
+        # Calculate daily forward rates with MONIA
+        daily_forward_rates_with_monia_df = calculate_daily_forward_rates_with_monia(new_maturities, interpolated_spot_rates, monia_rate)
+
+        # Calculate floating and fixed legs with the inputted fixed rate
+        fixed_leg_value = fixedleg(daily_forward_rates_with_monia_df, start_date, end_date, frequency, fixed_rate_input, notional)
+        float_leg_value = floatleg(daily_forward_rates_with_monia_df, start_date, end_date, frequency, notionnel=notional)
+
+        # Calculate NPV with the current fixed rate
+        npv_current = calculate_npv(fixed_leg_value, float_leg_value, is_fixed_payer)
+
+        # Calculate the fair fixed rate required to achieve the target NPV
+        fair_fixed_rate = calculate_fixed_rate(daily_forward_rates_with_monia_df, start_date, end_date, frequency, notionnel=notional, target_npv=0, tolerance=1e-4, max_iterations=1000)
+
+        # Display the NPV, fixed rate, and fair fixed rate
+        st.write(f"**Current Fixed Rate:** {fixed_rate_input * 100:.4f}%")
+        st.write(f"**Fair Fixed Rate:** {fair_fixed_rate * 100:.4f}%")
+        st.write(f"**Fixed Leg Value:** {fixed_leg_value:.2f}")
+        st.write(f"**Floating Leg Value:** {float_leg_value:.2f}")
+        st.write(f"**Net Present Value (NPV):** {npv_current:.2f}")
+
+        # Calculate Modified Duration and DV01
+        modified_duration, dv01 = calculate_modified_duration_and_dv01(
+            daily_forward_rates_with_monia_df, start_date, end_date, frequency, fixed_rate_input, notional, is_fixed_payer
+        )
+                # Display the modified duration and DV01
+        st.write(f"**Modified Duration:** {modified_duration:.6f}")
+        st.write(f"**DV01:** {dv01:.6f}")
+        # Initialize the variable df_bonds_with_duration to None to avoid UnboundLocalError
+        df_bonds_with_duration = None
+
+        # Step 2: After pricing, allow the user to upload a bond file
+        st.subheader("Upload Bond File and Match Duration")
+        
+        # Add a file uploader for the user to upload the bond file
+        bond_file = st.file_uploader("Upload Bond File (Excel format)", type=["xlsx", "xls"])
+
+        if bond_file:
+            # Step 3: Read the bond data
+            df_bonds = read_bond_data(bond_file)
+            
+            if df_bonds is not None:
+                # Step 4: Prepare and clean the bond data
+                df_bonds_cleaned = prepare_bond_data(df_bonds)
+
+                # Step 5: Calculate bond durations and add a new column
+                df_bonds_with_duration = calculate_bond_duration(df_bonds_cleaned, start_date)
+
+                # Match bond duration with swap duration
+                matching_bond_isin = match_bond_duration_with_swap(df_bonds_with_duration, modified_duration)
+
+                # Display the matching bond ISIN
+                st.write(f"Matching Bond ISIN with closest duration: {matching_bond_isin}")
+
+    # Column 3: Data and Plots
+    with col3:
+        st.header("Forward Rates Visualization")
+
+        # Filter the DataFrame for the selected period
+        start_years_diff = (start_date - start_date).days / 365
+        end_years_diff = (end_date - start_date).days / 365
+        filtered_forward_rates_df = daily_forward_rates_with_monia_df[
+            (daily_forward_rates_with_monia_df['Maturity_2'] >= start_years_diff) &
+            (daily_forward_rates_with_monia_df['Maturity_2'] <= end_years_diff)
+        ]
+
+        # Display forward rates data
+        with st.expander("Show Forward Rates Data"):
+            st.dataframe(filtered_forward_rates_df)
+
+        # Display zero-coupon rates data
+        with st.expander("Show Zero-Coupon Rates Data"):
+            st.dataframe(bond_data)
+
+        # Only display the bond DataFrame with the duration column if df_bonds_with_duration exists
+        if df_bonds_with_duration is not None:
+            with st.expander("Bond Data with Calculated Duration"):
+                st.dataframe(df_bonds_with_duration)
 
 
 
 if __name__ == "__main__":
     # Check if the script has already been run
     if "STREAMLIT_RUN" not in os.environ:
-        # Set an environment variable to ensure it only runs once
         os.environ["STREAMLIT_RUN"] = "true"
-        # Run the Streamlit app
-        os.system('streamlit run A.py')
+        os.system('streamlit run A2.py')
     else:
-        # This block runs when Streamlit is executing the script
         main()
