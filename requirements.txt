@@ -1,9 +1,7 @@
 requests
-beautifulsoup4
 pandas
 numpy
 scipy
 matplotlib
 streamlit
-selenium
-webdriver_manager
+
