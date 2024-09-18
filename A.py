@@ -394,6 +394,15 @@ def get_base64_image(image_path):
     with open(image_path, "rb") as img_file:
         return base64.b64encode(img_file.read()).decode()
 
+# Relative path to the logo file (assuming it's in the same folder or a subfolder like 'assets')
+logo_path = "./logo.png"  # Adjust this if your logo is in a different folder
+
+# Ensure that the path is correct and accessible
+if os.path.exists(logo_path):
+    logo_base64 = get_base64_image(logo_path)
+else:
+    st.error("Logo file not found.")
+
 # CSS for positioning the logo and the title
 st.markdown(
     """
@@ -411,9 +420,7 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
-# Get the base64 encoded version of the logo
-# Correct path to your logo image (without duplication)
-logo_base64 = get_base64_image("E:/AF/Internships/Application/Crédit du Maroc/Pricer Application/logo.png")  # Use single correct path
+
 
 # Embed the logo and the title together in the header
 st.markdown(
@@ -425,33 +432,8 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
-import streamlit as st
-from datetime import datetime
-import numpy as np
-import os
-import streamlit as st
-from datetime import datetime
-import numpy as np
-import os
-
-import streamlit as st
-from datetime import datetime
-import pandas as pd
-import numpy as np
-import os
-import streamlit as st
-from datetime import datetime
-import pandas as pd
-import numpy as np
-import os
 
 
-
-
-
-
-# Get the base64 encoded version of the logo (ensure path is correct)
-logo_base64 = get_base64_image("E:\AF\Internships\Application\Crédit du Maroc\Pricer Application\logo.png")  # Adjust path as needed
 
 
 
@@ -684,6 +666,6 @@ if __name__ == "__main__":
     # Check if the script has already been run
     if "STREAMLIT_RUN" not in os.environ:
         os.environ["STREAMLIT_RUN"] = "true"
-        os.system('streamlit run A.py')
+        os.system('streamlit run A2.py')
     else:
         main()
