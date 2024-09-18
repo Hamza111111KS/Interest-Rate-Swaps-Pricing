@@ -666,6 +666,6 @@ if __name__ == "__main__":
     # Check if the script has already been run
     if "STREAMLIT_RUN" not in os.environ:
         os.environ["STREAMLIT_RUN"] = "true"
-        os.system('streamlit run A2.py')
+        os.system('streamlit run A.py')
     else:
         main()
